@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<modification>
+    <name>Hide empty categories by Webpalych</name>
+    <code>hide_empty_categories_wbp</code>
+    <version>1.0</version>
+    <date>28.01.2017</date>
+    <author>webpalych</author>
+    <link>http://webpalych.pp.ua</link>
+
+    <file path="admin/model/catalog/category.php">
+        <operation>
+            <search><![CDATA[
+				public function getTotalCategoriesByLayoutId($layout_id) {
+			]]></search>
+            <add position="before"><![CDATA[
+				protected function getAllCategories_wbp () {
+
+                    $all_categories = array();
+                    $query = $this->db->query("SELECT category_id FROM " . DB_PREFIX . "category");
+
+                    foreach ($query->rows as $result) {
+                        $all_categories[] = $result['category_id'];
+                    }
+
+                    return $all_categories;
+
+                }
+
+                protected function getEmptyCategories_wbp () {
+
+                    $all_categories = $this->getAllCategories_wbp();
+                    $empty_categories = array();
+
+                    foreach ($all_categories as $category) {
+
+                        $query = $this->db->query("SELECT DISTINCT p.product_id FROM " . DB_PREFIX . "category_path cp LEFT JOIN " . DB_PREFIX . "product_to_category p2c ON (cp.category_id = p2c.category_id) LEFT JOIN " . DB_PREFIX . "product p ON (p2c.product_id = p.product_id) LEFT JOIN " . DB_PREFIX . "product_description pd ON (p.product_id = pd.product_id) LEFT JOIN " . DB_PREFIX . "product_to_store p2s ON (p.product_id = p2s.product_id) WHERE pd.language_id = '" . (int)$this->config->get('config_language_id') . "' AND p.status = '1' AND p.date_available <= NOW() AND p.quantity >= 1 AND p2s.store_id = '" . (int)$this->config->get('config_store_id') . "' AND cp.path_id = '". (int)$category ."' LIMIT 1");
+                        if( ! $query->row ) {
+                            $empty_categories[] = $category;
+                        }
+
+                    }
+
+                    return $empty_categories;
+                }
+
+                protected function getNotEmptyCategories_wbp ($all_categories, $empty_categories) {
+
+                    return array_diff($all_categories, $empty_categories);
+
+                }
+
+                public function  updateCategoriesStatus_wbp ( $all = false ) {
+
+
+                    if ( $all ) {
+
+                        $categories = $this->getAllCategories_wbp();
+                        $return = 0;
+
+                        foreach ($categories as $category) {
+
+                            $query = $this->db->query("UPDATE " . DB_PREFIX . "category SET status = '1' WHERE category_id = '" . (int)$category . "'");
+
+                            if ($query) {
+                                $return++;
+                            }
+
+                            if ($return == count($categories)) {
+                                $return = 'all';
+                            }
+
+                        }
+
+                    } else {
+
+                        $all_categories = $this->getAllCategories_wbp();
+                        $empty_categories = $this->getEmptyCategories_wbp();
+                        $not_empty_categories = $this->getNotEmptyCategories_wbp($all_categories, $empty_categories);
+                        $return = array(
+                            'all' => count($all_categories),
+                            'down' => 0,
+                            'up' => 0,
+                        );
+
+                        foreach ($empty_categories as $empty) {
+
+                            $query = $this->db->query("UPDATE " . DB_PREFIX . "category SET status = '0' WHERE category_id = '" . (int)$empty . "'");
+
+                            if ($query) {
+                                $return['down']++;
+                            }
+
+                        }
+
+                        foreach ($not_empty_categories as $not_empty) {
+                            $query = $this->db->query("UPDATE " . DB_PREFIX . "category SET status = '1' WHERE category_id = '" . (int)$not_empty . "'");
+
+                            if ($query) {
+                                $return['up']++;
+                            }
+
+                        }
+                    }
+
+                    return $return;
+
+                }
+			]]></add>
+        </operation>
+    </file>
+
+    <file path="admin/view/template/catalog/category_list.tpl">
+        <operation>
+            <search><![CDATA[
+				<button type="button" data-toggle="tooltip" title="<?php echo $button_delete; ?>" class="btn btn-danger" onclick="confirm('<?php echo $text_confirm; ?>') ? $('#form-category').submit() : false;"><i class="fa fa-trash-o"></i></button>
+			]]></search>
+            <add position="after"><![CDATA[
+				  <form action="<?php echo $update_statuses_wbp; ?>" method="post" enctype="multipart/form-data" id="form-update-statuses" style="display: none;"></form>
+                  <button type="button" data-toggle="tooltip" title="<?php echo $text_update_statuses; ?>" class="btn btn-danger" onclick="confirm('<?php echo $text_confirm; ?>') ? $('#form-update-statuses').submit() : false;"><?php echo $text_update_statuses; ?></button>
+                  <form action="<?php echo $turn_all_statuses_wbp; ?>" method="post" enctype="multipart/form-data" id="form-enable-all" style="display: none;"></form>
+                  <button type="button" data-toggle="tooltip" title="<?php echo $text_enable_all_categories; ?>" class="btn btn-danger" onclick="confirm('<?php echo $text_confirm; ?>') ? $('#form-enable-all').submit() : false;"><?php echo $text_enable_all_categories; ?></button>
+			]]></add>
+        </operation>
+    </file>
+
+    <file path="admin/controller/catalog/category.php">
+        <operation>
+            <search><![CDATA[
+				$data['heading_title'] = $this->language->get('heading_title');
+			]]></search>
+            <add position="after"><![CDATA[
+				$data['text_update_statuses'] = $this->language->get('text_update_statuses');
+                $data['text_enable_all_categories'] = $this->language->get('text_enable_all_categories');
+			]]></add>
+        </operation>
+        <operation>
+            <search><![CDATA[
+				protected function getList() {
+			]]></search>
+            <add position="after"><![CDATA[
+				if (isset($this->request->get['update_statuses_wbp'])) {
+
+                    $response = $this->model_catalog_category->updateCategoriesStatus_wbp();
+
+                    $status = $this->language->get('text_categories_enabled') . $response['up'] . ', ';
+                    $status .= $this->language->get('text_categories_disabled') . $response['down'] . ', ';
+                    $status .= $this->language->get('text_categories_total') . $response['all'] . '.';
+
+
+                    $this->session->data['success'] = $status;
+                }
+
+                if (isset($this->request->get['turn_all_statuses_wbp'])) {
+
+                    $response = $this->model_catalog_category->updateCategoriesStatus_wbp(true);
+
+                    if ($response == 'all') {
+                        $status = $this->language->get('text_all_categories_enabled');
+                    } else {
+                        $status = $this->language->get('text_categories_enabled') . $response;
+                    }
+
+                    $this->session->data['success'] = $status;
+
+                }
+
+                $data['update_statuses_wbp'] = $this->url->link('catalog/category', 'token=' . $this->session->data['token'] . '&update_statuses_wbp=1', 'SSL');
+
+                $data['turn_all_statuses_wbp'] = $this->url->link('catalog/category', 'token=' . $this->session->data['token'] . '&turn_all_statuses_wbp=1', 'SSL');
+			]]></add>
+        </operation>
+    </file>
+
+    <file path="admin/language/russian/catalog/category.php">
+        <operation>
+            <search><![CDATA[
+				// Text
+			]]></search>
+            <add position="after"><![CDATA[
+				$_['text_update_statuses']   = 'Обновить статусы категорий';
+                $_['text_enable_all_categories'] = 'Включить все категории';
+                $_['text_all_categories_enabled'] = 'Все категории включены!';
+                $_['text_categories_enabled'] = 'Включено категорий: ';
+                $_['text_categories_disabled'] = 'Выключено категорий: ';
+                $_['text_categories_total'] = 'Всего категорий: ';
+			]]></add>
+        </operation>
+    </file>
+
+    <file path="admin/language/english/catalog/category.php">
+        <operation>
+            <search><![CDATA[
+				// Text
+			]]></search>
+            <add position="after"><![CDATA[
+				$_['text_update_statuses']   = 'Update status categories';
+                $_['text_enable_all_categories'] = 'Enable all categories';
+                $_['text_all_categories_enabled'] = 'All categories enabled!';
+                $_['text_categories_enabled'] = 'Enabled categories: ';
+                $_['text_categories_disabled'] = 'Disabled categories: ';
+                $_['text_categories_total'] = 'Total categories: ';
+			]]></add>
+        </operation>
+    </file>
+
+</modification>
